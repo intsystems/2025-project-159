@@ -1,0 +1,276 @@
+\documentclass[12pt, twoside]{article}
+\usepackage{jmlda}
+\usepackage{url}
+\usepackage{graphicx}
+
+\usepackage[utf8]{inputenc}
+\newcommand{\hdir}{.}
+
+\begin{document}
+
+\title
+    {Restoring Functional Brain Groups Using Graph Diffusion Models}
+\author
+    {A.\,M.~Astakhov, S.\,K.~Panchenko, V.\,V.~Strijov} 
+\email
+    {astakhov.am@phystech.edu; panchenko.sk@phystech.edu; strijov@phystech.edu}
+\abstract{
+This paper addresses the problem of classifying a multivariate time series representing a human brain electroencephalogram (EEG). Standard approaches using two-dimensional convolutions fail to account for the spatial structure of the signal, since the sensors collecting the data are located on a spherical surface. As a solution, we propose using a graph-based representation of functional brain groups and modeling with neural diffusion.
+
+\keywords{Brain, EEG, Graph Neural Networks, Diffusion Models}
+
+\bigskip
+
+\noindent
+}
+
+\maketitle
+\par
+
+\section{Introduction}
+
+Emotions play a key role in human perception, decision-making, and social interaction. Their automatic classification based on neurophysiological data, such as electroencephalography (EEG), opens up new opportunities in psychology, medicine, affective computing, and human-computer interaction. However, despite significant advances in machine learning and neuroscience, accurate and reliable emotion classification using EEG remains a challenging task. This is due to high individual variability in signals, the nonlinear nature of emotional processes, and the limitations of existing preprocessing and classification methods.
+
+This paper reviews modern approaches to EEG-based emotion recognition, analyzing their advantages and disadvantages, and proposes ways to improve classification accuracy. Special attention is given to signal processing methods, informative feature extraction, and the application of deep learning algorithms. The results of this research can be useful in developing more effective affective interaction systems, neurorehabilitation tools, and psychophysiological studies. The subject of our study is a signal obtained through electroencephalographic examination of the human brain, interpreted as a multivariate time series, where each dimension corresponds to a specific sensor on the subject's head. EEG research is technically constrained by the method's low spatial resolution and high sensitivity to artifacts. As shown in \cite{1}, eye movements and muscle activity can significantly distort the signal. Moreover, individual differences in brain activity patterns among subjects greatly reduce the effectiveness of universal classifiers.
+
+Existing approaches are primarily based on two theoretical emotion models: the locationist (basic emotions) and the dimensional (valence-arousal-dominance, VAD) models \cite{3}. However, most modern methods do not take into account spatial relationships between electrodes, which limits their effectiveness.
+
+Various feature extraction methods are used in research:
+
+\textbf{Temporal features:} In \cite{4}, six statistical EEG parameters were used followed by channel selection using PCA and ReliefF, achieving an accuracy of 81.87\% on the DEAP dataset. However, the authors did not consider spatial correlations between electrodes.
+
+\textbf{Frequency features:} The study \cite{5} demonstrates the effectiveness of PCA for dimensionality reduction, followed by classification using SVM (accuracy of 85.85\% on SEED). Similarly, \cite{6} compares various features, showing that statistical characteristics combined with KNN yield an accuracy of 77.54--79\%.
+
+A major limitation of these works is that the analysis was performed on each electrode separately, without considering spatial interactions between different brain regions. This is especially important since emotional states are known to be associated with coordinated activity of distributed neural networks \cite{7}.
+
+The goal of our research is to utilize spatial connections between sensors to improve classification quality. We propose treating the time series as a dynamic graph, where edges represent spatial or statistical interconnections between sensors. We believe that accounting for these factors will allow for building a more accurate and robust classification model. We will explore approaches to constructing such connections and assess how they influence classification outcomes. Model performance will be evaluated using the open SEED IV dataset. As the classification model, we propose using DCGRU, which has shown strong results in the related problem of classifying epileptic seizures from EEG data \cite{DCGRU}.
+
+\section{Problem Statement}
+
+\subsection{Construction of the Adjacency Matrix}
+
+The original EEG signal is given as a tensor $\mathbf{X} = [\mathbf{X}_m]_{m=1}^M$, where $\mathbf{X}_m \in \mathbb{R}^{E \times N}$, $N$ corresponds to the number of time samples in the signal, $E$ is the number of electrodes capturing the signal, and $M$ is the number of trials. Additionally, the coordinate matrix of the electrodes is provided as $\mathbf{Z} \in \mathbb{R}^{E \times 3}$, determined by the EEG electrode placement standard used during recording. In this work, we propose to interpret the signal as an undirected dynamic graph:
+\[
+\mathcal{G}(m,t) = \left( \mathcal{V}(m,t), \mathcal{E}(m,t), \mathbf{A}_{\mathbf{X},\mathbf{Z}}(m,t) \right),
+\]
+to address the problem of modeling spatial relationships between electrodes on the subject's head. The set of vertices $\mathcal{V}(m,t)$ corresponds to the electrodes, with signal values at time $t$ assigned to each vertex. The set of edges $\mathcal{E}(m,t)$ is defined by the graph adjacency matrix $\mathbf{A}_{\mathbf{X},\mathbf{Z}}(m,t)$.
+
+\subsection{Basic Definitions}
+
+We are given a dataset $\mathfrak{D} = (\mathbf{X}, \mathbf{Z}, \mathbf{y})$ of brain activity, where:
+\begin{itemize}
+    \item $\mathbf{X} = [\mathbf{X}_m]_{m=1}^M$ — set of EEG signals;
+    \item $\mathbf{X}_m = [\mathbf{x}_t]_{t \in T}$ — signal recorded in the $m$-th trial;
+    \item $\mathbf{x}_t \in \mathbb{R}^E$ — signal observations at time $t$;
+    \item $\mathbf{Z} = [\mathbf{z}_k]_{k=1}^E$, $\mathbf{z}_k \in \mathbb{R}^3$ — coordinates of electrodes;
+    \item $\mathbf{y} = [y_m]_{m=1}^M$ — target variable;
+    \item $y_m \in \{1, \ldots, C\}$ — class label;
+    \item $T = \{t_n\}_{n=1}^N$ — set of time steps;
+    \item $E = 62$ — number of electrodes;
+    \item $N$ — number of observations in a signal segment.
+\end{itemize}
+
+To solve the decoding problem, we consider a model from the class of graph recurrent diffusion neural networks:
+
+\begin{equation}
+    h_\theta : (\mathbf{X}, \mathbf{\Delta}_{\mathbf{X},\mathbf{Z}}^*) \to \mathbf{y}.
+\end{equation}
+
+The cross-entropy function is chosen as the loss function:
+
+\begin{equation}
+    \mathcal{L} = -\frac{1}{M} \sum_{m=1}^M \left[ \sum_{c=1}^C \mathbf{I}(y_m = c) \log(p_m^c) \right],
+\end{equation}
+where $p_m^c = h_\theta \left( \mathbf{X}_m, \mathbf{\Delta}_{\mathbf{X},\mathbf{Z}}^*(m) \right)$ is the probability of class $c$ for input $\mathbf{X}_m$ with adjacency matrix $\mathbf{\Delta}_{\mathbf{X},\mathbf{Z}}^*(m)$.
+
+The parameter optimization problem is defined as:
+
+\begin{equation}
+    \hat{\theta} = \arg \max_{\theta} \mathcal{L}(\theta, \mathbf{X}, \mathbf{\Delta}_{\mathbf{X},\mathbf{Z}}^*).
+\end{equation}
+
+\section{Adjacency Matrix Construction}
+
+This section describes methods for constructing the adjacency matrix by estimating the relationships between time series corresponding to the electrodes. We focus on phase synchronization of the signals.
+
+\subsection{Phase Synchronization of Signals}
+
+Phase synchronization is an approach for analyzing potential nonlinear dependencies and focuses on the phases of signals. It is assumed that two dynamic systems may exhibit phase synchronization even if their amplitudes are independent. Let $x(t)$ and $y(t)$ denote the dynamic systems corresponding to signal observations $\mathbf{x}_{mi}$ and $\mathbf{x}_{mj}$ in the time interval $[t_n - T_w, t_n]$ of the $m$-th trial. Phase synchronization is defined as:
+
+\begin{equation}
+|\phi_x(t) - \phi_y(t)| = \text{const}.
+\end{equation}
+
+To estimate the phase, the analytic signal representation is computed using the Hilbert transform:
+
+\begin{equation}
+H(t) = x(t) + i\dot{x}(t),
+\end{equation}
+
+where
+
+\begin{equation}
+\dot{x}(t) = \frac{1}{\pi} \text{v.p.} \int_{-\infty}^{\infty} \frac{x(t')}{t - t'} dt' \quad \text{— Hilbert transform of the signal } x(t),
+\end{equation}
+
+\noindent with v.p. denoting the Cauchy principal value of the integral.
+
+The phase of the analytic signal is defined as:
+
+\begin{equation}
+\phi(t) = \arctan \left( \frac{\dot{x}(t)}{x(t)} \right).
+\end{equation}
+
+For two signals $x(t)$ and $y(t)$ of equal duration $T_w$ with phases $\phi_x(t)$ and $\phi_y(t)$, the phase locking value (PLV) \cite{9} is computed as:
+
+\begin{equation}
+p_{ij}(m, t_n) = \left| \frac{1}{T_w} \sum_{k=1}^{T_w} \exp \left( i(\phi_x(k \Delta t) - \phi_y(k \Delta t)) \right) \right|,
+\end{equation}
+
+where $\Delta t$ is the time step, and $i = \sqrt{-1}$.
+
+The adjacency matrix is defined as:
+
+\begin{equation}
+\mathbf{A}_{\mathbf{X}, Z}^*(m, t) = [a_{ij}(m, t)] \in \mathbb{R}_+^{E \times E}, \quad a_{ij}(m, t) = 
+\begin{cases} 
+p_{ij}(m, t), & \text{if } p_{ij}(m, t) \geq \rho(p), \\
+0, & \text{otherwise}.
+\end{cases}
+\end{equation}
+
+\section{Classification Model}
+
+To solve the classification task, we propose using the \textbf{DCGRU} model~\cite{DCRNN}, which has shown strong performance in EEG-based epileptic seizure classification~\cite{DCGRU}. We argue that diffusion allows information to propagate across distant graph vertices, improving classification accuracy and making the model more robust to noise—an important property given the highly individual nature of EEG data.
+
+Graph diffusion is modeled via the spectral convolution
+\[
+X_{:,p} \star_{\mathcal{G}} f_\theta = \Phi\, F(\theta)\, \Phi^\top X_{:,p},
+\]
+where
+\begin{itemize}
+    \item $L = \Phi \Lambda \Phi^\top$ is the spectral decomposition of the graph Laplacian,
+    \item $F(\theta) = \displaystyle\sum_{k=0}^{K-1} \theta_k \Lambda^k$ is a polynomial filter,
+    \item $p$ is the vertex-feature index.
+\end{itemize}
+For an undirected graph $\mathcal{G}$ this operation is equivalent (up to a similarity transform) to diffusion convolution on the graph~\cite{DCRNN}.
+
+The core of the model is defined by
+\begin{align*}
+r^{(t)} &= \sigma\!\bigl(\Theta_r \star_g [X^{(t)}, H^{(t-1)}] + b_r\bigr),\\
+u^{(t)} &= \sigma\!\bigl(\Theta_u \star_g [X^{(t)}, H^{(t-1)}] + b_u\bigr),\\
+C^{(t)} &= \tanh\!\bigl(\Theta_C \star_g [X^{(t)}, r^{(t)} \odot H^{(t-1)}] + b_c\bigr),\\
+H^{(t)} &= u^{(t)} \odot H^{(t-1)} + \bigl(1-u^{(t)}\bigr) \odot C^{(t)},
+\end{align*}
+where
+\begin{itemize}
+    \item $X^{(t)}$, $H^{(t)}$ are the input and hidden state at time step $t$,
+    \item $r^{(t)}$, $u^{(t)}$ are the reset and update gates,
+    \item $\Theta_r$, $\Theta_u$, $\Theta_C$ are learnable filter parameters,
+    \item $\star_g$ denotes the diffusion convolution operator,
+    \item $\odot$ is element-wise multiplication,
+    \item $\sigma$ is the logistic sigmoid.
+\end{itemize}
+
+\section{Feature Representation}
+
+As node features we use the \emph{differential entropy} values computed for the following EEG rhythm bands:
+\begin{itemize}
+    \item delta (1--3 Hz),
+    \item theta (4--7 Hz),
+    \item alpha (8--13 Hz),
+    \item beta  (14--30 Hz),
+    \item gamma (31--50 Hz).
+\end{itemize}
+
+For a normally distributed random variable $Y \sim \mathcal{N}(\mu,\sigma^2)$, the differential entropy is
+\begin{equation}
+DE(Y) = -\int_{-\infty}^{\infty} 
+\frac{1}{\sqrt{2\pi\sigma^2}}
+e^{-\frac{(y-\mu)^2}{2\sigma^2}}
+\log\!\left(
+\frac{1}{\sqrt{2\pi\sigma^2}}
+e^{-\frac{(y-\mu)^2}{2\sigma^2}}
+\right)dy.
+\end{equation}
+
+Hence, at each time instant $t$ the graph signal has shape
+\[
+x_t \in \mathbb{R}^{62 \times 5},
+\]
+where 62 is the number of electrodes and 5 is the number of frequency bands.
+
+\section{Computational Experiment Plan}
+
+\textbf{Hypothesis:} accounting for the spatial and functional structure of the EEG signal and using diffusion-based methods improves the accuracy of human emotion classification.
+
+\textbf{Objectives:}
+\begin{enumerate}
+    \item Construct adjacency matrices between electrodes using different methods.
+    \item Evaluate the performance of the proposed spatio-temporal model on the resulting graphs.
+\end{enumerate}
+
+The study employs the dataset described in~\cite{Dataset}, aimed at analysing affective states. Fifteen participants meeting the required medical criteria took part after providing informed consent and being briefed on the protocol.
+
+Visual stimuli consisted of video clips from four categories. Selection criteria included
+\begin{itemize}
+    \item limited duration to avoid fatigue,
+    \item clear content without extra explanation,
+    \item ability to evoke well-defined emotions.
+\end{itemize}
+Each clip lasted about two minutes and was edited to enhance emotional impact.
+
+The experiment comprised three sessions of 24 trials each; the clip order prevented consecutive presentation of the same category. After every clip, participants filled out a questionnaire describing their experienced emotions.
+
+EEG was recorded with 62 electrodes placed according to the standard montage, at a sampling rate of 1 kHz.
+
+\textbf{Pre-processing} included:
+\begin{itemize}
+    \item band-pass filtering in 0.3–50 Hz to remove noise and artifacts,
+    \item down-sampling to 200 Hz.
+\end{itemize}
+\section{Results}
+
+The experiment compared the performance of two recurrent neural network architectures: one with a single recurrent layer and one with two recurrent layers. The effect of input sequence length on learning quality was also studied by using sequences of 12 and 17 time steps. All model configurations were trained on an NVIDIA Tesla T4 GPU, with training time for each setup approximately 15 minutes.
+
+The best results were achieved by the model with two recurrent layers trained on sequences of 17 elements. As the plots show, the GRU baseline performed worse than DCGRU. It is also worth noting that models with only one recurrent layer tended to overfit more quickly.
+
+\begin{center}
+\includegraphics[width=0.7\linewidth]{basic.pdf}
+\captionof{figure}{Model with one recurrent layer, 12-element input sequence}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.7\linewidth]{2_layers.pdf}
+\captionof{figure}{Model with two recurrent layers, 12-element input sequence}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.7\linewidth]{big_graup.pdf}
+\captionof{figure}{Model with one recurrent layer, 17-element input sequence}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.7\linewidth]{big_graup_2_layers.pdf}
+\captionof{figure}{Model with two recurrent layers, 17-element input sequence}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.7\linewidth]{GRU.pdf}
+\captionof{figure}{GRU baseline model}
+\end{center}
+
+\section{Conclusion}
+
+This study proposes an approach to human emotion classification based on EEG data that takes into account both spatial and functional brain structure. The EEG signal is interpreted as a dynamic graph, where the vertices represent electrodes and the edges represent connections derived via phase synchronization.
+
+Using this graph representation, we implemented a classification model based on the DCGRU graph recurrent neural network, which can capture both temporal and spatial dependencies among EEG channels.
+
+The proposed approach achieved higher classification accuracy compared to baseline models with similar parameter counts that do not account for electrode interaction structure. This supports the hypothesis that spatio-temporal organization of brain activity plays an important role in EEG signal analysis. The results demonstrate the potential of graph neural networks and diffusion-based models in neurophysiological analysis and emotion recognition tasks, opening avenues for further research and applications in affective computing, neurorehabilitation, and psychophysiological diagnostics.
+
+\newpage
+
+\bibliographystyle{plain}
+\bibliography{Biblio}
+
+\end{document}
